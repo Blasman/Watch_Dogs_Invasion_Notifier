@@ -2,7 +2,7 @@ import os, sys, json, ctypes
 import tkinter as tk
 from tkinter import messagebox
 
-VERSION = "v3.000"
+VERSION = "v3.005"
 
 def check_for_windows_os():
     current_platform = sys.platform
@@ -162,7 +162,7 @@ def is_watch_dogs_the_active_window():
 
             if current_window_check:
                 in_game_overlay.toggle_visibility(True)
-                if autohotkeys and not hotkeys_started:
+                if should_enable_ahk() and not hotkeys_started:
                     ahk.start_hotkeys()
                     hotkeys_started = True
                 if anti_afk_enabled and stop_anti_afk_timeout.is_set():
@@ -271,6 +271,9 @@ def quit_invasion():  # added redundant if check for extra safety
 
 def open_online_menu():  # added redundant if check for extra safety
     if wd_active_window: ahk.run_script(open_online_menu_ahk_script)
+
+def quit_invasion_then_open_online_menu():
+    if wd_active_window: ahk.run_script(quit_invasion_then_open_online_menu_ahk_script)
 
 def press_anti_afk_keys():
     global last_afk_key_pressed
@@ -463,7 +466,9 @@ def save_config():
             'toggle_online_services': toggle_online_hotkey,
             'reload_last_autosave_keypresses': reload_last_autosave_hotkey,
             'quit_invasion_keypresses': quit_invasion_hotkey,
-            'open_online_menu_keypresses': open_online_menu_hotkey
+            'open_online_menu_keypresses': open_online_menu_hotkey,
+            'quit_invasion_then_open_online_menu_keypresses': quit_invasion_then_open_online_menu_hotkey
+
         },
         'allow_vpn_server_switching': allow_vpn_server_switching,
         'run_wdin_as_admin': run_wdin_as_admin
@@ -679,7 +684,7 @@ def handle_packet(event, ip_address):
 
     in_game_overlay.update_content(overlay_content)
     if log_current_event_to_file:
-        with open(CURRENT_EVENT_FILE, "w") as logfile:
+        with open(CURRENT_EVENT_FILE, "w", encoding="utf-8") as logfile:
             logfile.write(overlay_content)
 
     toggle_disconnect_button(event in ["invaded_receive", "invasion_receive"])
@@ -963,7 +968,7 @@ def toggle_firewall_rules():
         cmd = toggle_firewall_on_cmd
         in_game_overlay.update_content("OFFLINE")
         if log_current_event_to_file:
-            with open(CURRENT_EVENT_FILE, "w") as logfile:
+            with open(CURRENT_EVENT_FILE, "w", encoding="utf-8") as logfile:
                 logfile.write("OFFLINE")
     else:
         cmd = toggle_firewall_off_cmd
@@ -1068,7 +1073,7 @@ capture_is_on = False
 monitor_ip_change = None
 
 # Logging settings
-log_current_event_to_file = False
+log_current_event_to_file = True
 
 # Watch Dogs window checking
 wd_active_window = False
@@ -1140,6 +1145,7 @@ toggle_online_hotkey = ""
 reload_last_autosave_hotkey = ""
 quit_invasion_hotkey = ""
 open_online_menu_hotkey = ""
+quit_invasion_then_open_online_menu_hotkey = ""
 reload_last_autosave_ahk_script = ""
 quit_invasion_ahk_script = ""
 open_online_menu_ahk_script = ""
@@ -1159,7 +1165,7 @@ allow_vpn_server_switching = False
 network_interface = get_config_value(config, ['network_interface'], "")
 
 # Logging settings
-log_current_event_to_file = get_config_value(config, ['logging', 'log_current_event_to_current_event_txt_file'], False)
+log_current_event_to_file = get_config_value(config, ['logging', 'log_current_event_to_current_event_txt_file'], True)
 
 # In game overlay settings
 overlay_custom_font = get_config_value(config, ['display_current_event_in_game', 'font'], "Arial")
@@ -1199,6 +1205,7 @@ toggle_online_hotkey = get_config_value(config, ['in_game_ahk_style_hotkeys', 't
 reload_last_autosave_hotkey = get_config_value(config, ['in_game_ahk_style_hotkeys', 'reload_last_autosave_keypresses'], "")
 quit_invasion_hotkey = get_config_value(config, ['in_game_ahk_style_hotkeys', 'quit_invasion_keypresses'], "")
 open_online_menu_hotkey = get_config_value(config, ['in_game_ahk_style_hotkeys', 'open_online_menu_keypresses'], "")
+quit_invasion_then_open_online_menu_hotkey = get_config_value(config, ['in_game_ahk_style_hotkeys', 'quit_invasion_then_open_online_menu_keypresses'], "")
 
 if reload_last_autosave_hotkey:
     reload_last_autosave_ahk_script = """
@@ -1242,16 +1249,44 @@ if open_online_menu_hotkey:
         Sleep, 5
     """
 
+if quit_invasion_then_open_online_menu_hotkey:
+    quit_invasion_then_open_online_menu_ahk_script = """
+        Send, {Esc}
+        Sleep, 160
+        Send, {Down down}
+        Sleep, 5
+        Send, {Down up}
+        Sleep, 5
+        Send, {Enter}
+        Sleep, 5
+        Send, {Enter}
+        Sleep, 100
+        Send, {MButton}
+        Sleep, 160
+        Send, {Down down}
+        Sleep, 5
+        Send, {Down up}
+        Sleep, 5
+        Send, {Enter}
+        Sleep, 5
+    """
+
 autohotkeys = {
     "disconnect": (disconnect_hotkey, disconnect_from_online_session) if admin and disconnect_hotkey else None,
     "toggle_online": (toggle_online_hotkey, toggle_firewall_rules) if admin and toggle_online_hotkey else None,
     "reload_autosave": (reload_last_autosave_hotkey, reload_last_autosave) if reload_last_autosave_hotkey else None,
     "quit_invasion": (quit_invasion_hotkey, quit_invasion) if quit_invasion_hotkey else None,
     "open_online_menu": (open_online_menu_hotkey, open_online_menu) if open_online_menu_hotkey else None,
+    "quit_invasion_then_open_online_menu": (quit_invasion_then_open_online_menu_hotkey, quit_invasion_then_open_online_menu) if quit_invasion_then_open_online_menu_hotkey else None
 }
 
 autohotkeys = {name: value for name, value in autohotkeys.items() if value is not None}
-if autohotkeys:
+
+# Enable AHK if anything requires it
+def should_enable_ahk():
+    return (autohotkeys or display_reveal_the_invader_button_on_gui or reveal_the_invader_enabled or display_anti_afk_button_on_gui or anti_afk_enabled)
+
+if should_enable_ahk():
     ahk_path = resource_path(os.path.join('bin', 'AutoHotkey.exe'))
     ahk = AHK(executable_path=ahk_path)
     for name, (key, callback) in autohotkeys.items():
